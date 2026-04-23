@@ -1,0 +1,37 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+*.tsbuildinfo
+
+# Tests / coverage
+coverage/
+.vitest-reports/
+
+# Environment / secrets
+.env
+.env.*
+!.env.example
+
+# Runtime state (user OAuth tokens, response cache)
+.gsc-mcp/
+
+# Editor / OS
+.DS_Store
+.idea/
+.vscode/
+*.swp
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# MCPB bundle output
+*.mcpb
+bundle/
+
+# Local notes
+SCRATCH.md

@@ -1,0 +1,73 @@
+<!--
+  Evaluation suite for @seobandwagon/gsc-mcp.
+
+  IMPORTANT: Because Google Search Console data is account-specific and changes
+  daily, these questions are written as a TEMPLATE against a fixed-snapshot
+  "canonical property". Before running, substitute:
+
+    {SITE}       — your verified GSC property URL (e.g. sc-domain:example.com)
+    {SNAPSHOT}   — a fixed 28-day window whose data you've frozen for testing
+    {SNAPSHOT_START}, {SNAPSHOT_END} — the YYYY-MM-DD bounds of {SNAPSHOT}
+    {PREV_START}, {PREV_END}         — the preceding 28-day window
+
+  Then fill in each <answer> with the value you verified against the snapshot.
+
+  The questions below are designed to exercise every tool family and stress the
+  structuredContent output. They are INDEPENDENT, READ-ONLY, and composable —
+  solving each should require 2–8 tool calls.
+
+  See evals/README.md for the recommended snapshot workflow.
+-->
+<evaluation>
+
+  <qa_pair>
+    <question>Which query had the highest CTR (among queries with at least 100 impressions) on {SITE} during the 28 days starting {SNAPSHOT_START}? Report the exact query string.</question>
+    <answer>TODO_FILL_IN</answer>
+  </qa_pair>
+
+  <qa_pair>
+    <question>Across all top pages of {SITE} during the window {SNAPSHOT_START} to {SNAPSHOT_END}, how many distinct pages rank between position 4 and position 10 inclusive? Return the count as an integer.</question>
+    <answer>TODO_FILL_IN</answer>
+  </qa_pair>
+
+  <qa_pair>
+    <question>Compare the 28-day window starting {SNAPSHOT_START} against the immediately preceding 28-day window for {SITE}. What is the percentage change in total clicks, rounded to the nearest whole number and prefixed with + or -?</question>
+    <answer>TODO_FILL_IN</answer>
+  </qa_pair>
+
+  <qa_pair>
+    <question>Inspect the URL {SITE}/ (the site root) on {SITE}. What is the coverageState returned by the index status? Return it exactly as the API reports it.</question>
+    <answer>TODO_FILL_IN</answer>
+  </qa_pair>
+
+  <qa_pair>
+    <question>For {SITE}, how many sitemaps are currently submitted that have at least one warning? Return the count.</question>
+    <answer>TODO_FILL_IN</answer>
+  </qa_pair>
+
+  <qa_pair>
+    <question>Using the cannibalization check on {SITE} for the window {SNAPSHOT_START} to {SNAPSHOT_END}, which query has the most pages competing for it? Return the exact query string. (If multiple tie, return the alphabetically first.)</question>
+    <answer>TODO_FILL_IN</answer>
+  </qa_pair>
+
+  <qa_pair>
+    <question>For {SITE} over the window {SNAPSHOT_START} to {SNAPSHOT_END}, how many queries have an average position between 4.0 and 10.0 AND more than 500 impressions? Return the integer count.</question>
+    <answer>TODO_FILL_IN</answer>
+  </qa_pair>
+
+  <qa_pair>
+    <question>Run the opportunity analyzer on {SITE} with analysisType "standard". How many opportunities are classified as high priority? Return the integer count.</question>
+    <answer>TODO_FILL_IN</answer>
+  </qa_pair>
+
+  <qa_pair>
+    <question>On {SITE} during the window {SNAPSHOT_START} to {SNAPSHOT_END}, which single page received the most clicks? Return its absolute URL.</question>
+    <answer>TODO_FILL_IN</answer>
+  </qa_pair>
+
+  <qa_pair>
+    <question>Submit a bulk inspection of the three URLs {SITE}/, {SITE}/about, and {SITE}/contact on {SITE}. How many of the three return verdict "PASS" on indexStatusResult? Return the integer count.</question>
+    <answer>TODO_FILL_IN</answer>
+  </qa_pair>
+
+</evaluation>

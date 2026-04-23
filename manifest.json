@@ -1,0 +1,69 @@
+{
+  "manifest_version": "0.3",
+  "name": "gsc-mcp",
+  "display_name": "Google Search Console",
+  "version": "0.1.0",
+  "description": "Query Google Search Console performance data, inspect URLs, manage sitemaps, and surface SEO opportunities — directly from Claude.",
+  "long_description": "A Model Context Protocol server that exposes Google Search Console to Claude and other MCP clients. Fifteen tools cover search analytics, URL inspection, sitemap management, period comparisons, content gap analysis, cannibalization detection, and cache control. Uses your own Google OAuth credentials — nothing is proxied through third-party infrastructure. Prefer a hosted experience? See seobandwagon.com.",
+  "author": {
+    "name": "SEO Bandwagon",
+    "url": "https://seobandwagon.com"
+  },
+  "homepage": "https://github.com/seo-bandwagon/gsc-mcp",
+  "documentation": "https://github.com/seo-bandwagon/gsc-mcp#readme",
+  "support": "https://github.com/seo-bandwagon/gsc-mcp/issues",
+  "license": "MIT",
+  "keywords": [
+    "seo",
+    "google-search-console",
+    "gsc",
+    "analytics"
+  ],
+  "server": {
+    "type": "node",
+    "entry_point": "dist/index.js",
+    "mcp_config": {
+      "command": "node",
+      "args": [
+        "${__dirname}/dist/index.js"
+      ],
+      "env": {
+        "GSC_CLIENT_ID": "${user_config.client_id}",
+        "GSC_CLIENT_SECRET": "${user_config.client_secret}",
+        "GSC_LOG_LEVEL": "${user_config.log_level}"
+      }
+    }
+  },
+  "user_config": {
+    "client_id": {
+      "type": "string",
+      "title": "Google OAuth Client ID",
+      "description": "From your Google Cloud project — APIs & Services → Credentials → OAuth 2.0 Client ID (Desktop app).",
+      "required": true
+    },
+    "client_secret": {
+      "type": "string",
+      "title": "Google OAuth Client Secret",
+      "description": "The client secret paired with your OAuth Client ID.",
+      "sensitive": true,
+      "required": true
+    },
+    "log_level": {
+      "type": "string",
+      "title": "Log level",
+      "description": "Verbosity of server logs. Use 'debug' when troubleshooting.",
+      "required": false,
+      "default": "info"
+    }
+  },
+  "compatibility": {
+    "runtimes": {
+      "node": ">=18.0.0"
+    },
+    "platforms": [
+      "darwin",
+      "linux",
+      "win32"
+    ]
+  }
+}

@@ -1,0 +1,72 @@
+{
+  "name": "@seobandwagon/gsc-mcp",
+  "version": "0.1.0",
+  "description": "Google Search Console MCP server — bring your GSC data into Claude and other MCP clients.",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "bin": {
+    "gsc-mcp": "dist/index.js",
+    "gsc-mcp-auth": "dist/auth/cli.js"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE",
+    "CHANGELOG.md"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "dev": "tsc --watch",
+    "auth": "node dist/auth/cli.js",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:ui": "vitest --ui",
+    "test:coverage": "vitest run --coverage",
+    "bundle": "node scripts/build-bundle.mjs",
+    "prepublishOnly": "npm run build && npm test"
+  },
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "google-search-console",
+    "gsc",
+    "seo",
+    "claude",
+    "anthropic",
+    "seobandwagon"
+  ],
+  "author": "SEO Bandwagon",
+  "license": "MIT",
+  "homepage": "https://github.com/seo-bandwagon/gsc-mcp#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/seo-bandwagon/gsc-mcp.git"
+  },
+  "bugs": {
+    "url": "https://github.com/seo-bandwagon/gsc-mcp/issues"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.25.0",
+    "express": "^4.18.2",
+    "googleapis": "^130.0.0",
+    "open": "^10.0.0",
+    "zod": "^3.22.4"
+  },
+  "devDependencies": {
+    "@types/express": "^4.17.21",
+    "@types/node": "^20.10.0",
+    "@vitest/coverage-v8": "^4.0.18",
+    "@vitest/ui": "^4.0.18",
+    "memfs": "^4.56.10",
+    "typescript": "^5.3.3",
+    "vitest": "^4.0.18"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
