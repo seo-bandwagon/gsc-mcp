@@ -241,12 +241,14 @@ describe('GSCClient', () => {
       const mockOperation = vi.fn().mockRejectedValue(create500Error());
 
       const resultPromise = client.withRetry(mockOperation, 'test.endpoint', 3);
+      // Attach the rejection assertion BEFORE advancing timers so vitest 4
+      // doesn't surface the intermediate retries as "unhandled" errors on CI.
+      const assertion = expect(resultPromise).rejects.toThrow(GSCApiError);
 
-      // Advance through all retries
       await vi.advanceTimersByTimeAsync(1000); // First backoff
       await vi.advanceTimersByTimeAsync(2000); // Second backoff
 
-      await expect(resultPromise).rejects.toThrow(GSCApiError);
+      await assertion;
       expect(mockOperation).toHaveBeenCalledTimes(3);
     });
 
@@ -254,10 +256,11 @@ describe('GSCClient', () => {
       const mockOperation = vi.fn().mockRejectedValue(create500Error());
 
       const resultPromise = client.withRetry(mockOperation, 'test.endpoint', 2);
+      const assertion = expect(resultPromise).rejects.toThrow();
 
       await vi.advanceTimersByTimeAsync(1000);
 
-      await expect(resultPromise).rejects.toThrow();
+      await assertion;
       expect(mockOperation).toHaveBeenCalledTimes(2);
     });
 
