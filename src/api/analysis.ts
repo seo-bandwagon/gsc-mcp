@@ -64,7 +64,12 @@ export class AnalysisApi {
 
     // Analyze coverage/indexing issues
     if (focusAreas.includes('coverage')) {
-      const coverageOpportunities = await this.analyzeCoverageOpportunities(params.siteUrl);
+      const coverageOpportunities = await this.analyzeCoverageOpportunities(
+        params.siteUrl,
+        startDate,
+        endDate,
+        days
+      );
       opportunities.push(...coverageOpportunities);
     }
 
@@ -249,62 +254,66 @@ export class AnalysisApi {
     return { opportunities, quickWins };
   }
 
-  private async analyzeCoverageOpportunities(siteUrl: string): Promise<Opportunity[]> {
+  private async analyzeCoverageOpportunities(
+    siteUrl: string,
+    startDate: string,
+    endDate: string,
+    analysisDays: number
+  ): Promise<Opportunity[]> {
     const opportunities: Opportunity[] = [];
 
     try {
       const health = await this.sitemaps.getSitemapHealth(siteUrl);
 
-      // Check index rate
-      if (health.indexRate < 90) {
-        opportunities.push({
-          type: 'indexing_issue',
-          priority: health.indexRate < 70 ? 'high' : 'medium',
-          title: 'Low sitemap index rate',
-          description: `Only ${health.indexRate.toFixed(1)}% of submitted URLs are indexed (${health.indexedUrls}/${health.totalUrls})`,
-          recommendations: [
-            'Review excluded URLs in Search Console for specific issues',
-            'Ensure all submitted URLs return 200 status',
-            'Check for duplicate content issues',
-            'Verify robots.txt is not blocking important pages',
-            'Improve internal linking to orphan pages'
-          ]
+      // Don't trust contents[].indexed from the Sitemaps API — it's deprecated
+      // and frequently returns 0 even for fully-indexed sitemaps. Instead,
+      // count submitted URLs that received impressions in the analysis window:
+      // a URL with impressions is by definition indexed. Skip the heuristic
+      // for tiny sitemaps where Search Analytics noise dominates.
+      if (health.totalUrls >= 20) {
+        const sa = await this.searchAnalytics.query({
+          siteUrl,
+          startDate,
+          endDate,
+          dimensions: ['page'],
+          rowLimit: 25000
         });
+        const pagesWithImpressions = sa.rows.length;
+        const coverage = pagesWithImpressions / health.totalUrls;
+
+        if (coverage < 0.30) {
+          opportunities.push({
+            type: 'indexing_issue',
+            priority: coverage < 0.10 ? 'high' : 'medium',
+            title: 'Low search visibility for submitted URLs',
+            description: `Only ${pagesWithImpressions} of ${health.totalUrls} submitted URLs received impressions in the last ${analysisDays} days (${(coverage * 100).toFixed(1)}%), which can indicate indexation gaps.`,
+            recommendations: [
+              'Spot-check a few sitemap URLs with the URL Inspection tool to confirm indexation status',
+              'Review the Pages report in Search Console for excluded reasons',
+              'Ensure all submitted URLs return 200 and are not blocked by robots.txt or noindex',
+              'Improve internal linking to orphan pages',
+              'Note: low-traffic pages can be indexed without impressions — verify before acting'
+            ]
+          });
+        }
       }
 
-      // Check for sitemap issues
-      if (health.issues.length > 0) {
-        const errorCount = health.issues.filter((i) => i.type === 'error').length;
-        const warningCount = health.issues.filter((i) => i.type === 'warning').length;
-
-        if (errorCount > 0) {
-          opportunities.push({
-            type: 'indexing_issue',
-            priority: 'high',
-            title: 'Sitemap errors detected',
-            description: `${errorCount} sitemaps have errors that need attention`,
-            recommendations: [
-              'Check sitemap format and validate against schema',
-              'Ensure all URLs in sitemap are accessible',
-              'Remove URLs that return 4xx or 5xx errors',
-              'Update lastmod dates to reflect actual changes'
-            ]
-          });
-        }
-
-        if (warningCount > 0) {
-          opportunities.push({
-            type: 'indexing_issue',
-            priority: 'low',
-            title: 'Sitemap warnings',
-            description: `${warningCount} sitemaps have warnings`,
-            recommendations: [
-              'Review warning details in Search Console',
-              'Consider splitting large sitemaps',
-              'Ensure consistent URL formats'
-            ]
-          });
-        }
+      // Sitemap-level errors. The warnings counter from this API often diverges
+      // from the GSC UI, so we intentionally only flag errors here.
+      const errorCount = health.issues.filter((i) => i.type === 'error').length;
+      if (errorCount > 0) {
+        opportunities.push({
+          type: 'indexing_issue',
+          priority: 'high',
+          title: 'Sitemap errors detected',
+          description: `${errorCount} sitemaps have errors that need attention`,
+          recommendations: [
+            'Check sitemap format and validate against schema',
+            'Ensure all URLs in sitemap are accessible',
+            'Remove URLs that return 4xx or 5xx errors',
+            'Update lastmod dates to reflect actual changes'
+          ]
+        });
       }
     } catch {
       // Sitemap analysis failed, skip
@@ -333,6 +342,11 @@ export class AnalysisApi {
 
     for (const [pattern, queries] of Object.entries(queryClusters)) {
       const totalImpressions = queries.reduce((sum, q) => sum + q.impressions, 0);
+
+      // Skip clusters with zero impressions: weighted-avg position would be
+      // 0/0 = NaN, and a content gap with no impressions isn't a gap.
+      if (totalImpressions === 0) continue;
+
       const avgPosition =
         queries.reduce((sum, q) => sum + q.position * q.impressions, 0) / totalImpressions;
 
@@ -387,6 +401,10 @@ export class AnalysisApi {
         // Check if there's significant traffic split
         const totalClicks = pages.reduce((sum, p) => sum + p.clicks, 0);
         const topPageClicks = pages[0].clicks;
+
+        // Skip queries with no clicks across any page: 0/0 = NaN compares
+        // false here, but the silent skip is fragile. Make it explicit.
+        if (totalClicks === 0) continue;
 
         // If top page doesn't get majority of clicks, it's a cannibalization issue - no click threshold
         if (topPageClicks / totalClicks < 0.7) {
@@ -475,20 +493,24 @@ export class AnalysisApi {
   ): Record<string, SearchAnalyticsRow[]> {
     const clusters: Record<string, SearchAnalyticsRow[]> = {};
 
+    // Stable pattern KEYS, not the captured match. Previously this used
+    // `query.match(/^how to .+/)?.[0]` which captured the full query, so
+    // every "how to ..." query landed in its own cluster and the length>=2
+    // filter eliminated all clusters.
+    const patternRules: Array<{ key: string; test: (q: string) => boolean }> = [
+      { key: 'how to', test: (q) => /^how to .+/.test(q) },
+      { key: 'what is', test: (q) => /^what is .+/.test(q) },
+      { key: 'best', test: (q) => /^best .+/.test(q) },
+      { key: 'vs', test: (q) => / vs /.test(q) },
+      { key: 'tutorial', test: (q) => / tutorial\b/.test(q) || /\btutorial$/.test(q) },
+      { key: 'guide', test: (q) => / guide\b/.test(q) || /\bguide$/.test(q) }
+    ];
+
     for (const row of rows) {
       const query = row.keys[0].toLowerCase();
 
-      // Extract key patterns
-      const patterns = [
-        query.match(/^how to .+/)?.[0],
-        query.match(/^what is .+/)?.[0],
-        query.match(/^best .+/)?.[0],
-        query.match(/.+ vs .+/)?.[0],
-        query.match(/.+ tutorial/)?.[0],
-        query.match(/.+ guide/)?.[0]
-      ].filter(Boolean);
-
-      const pattern = patterns[0] || query.split(' ').slice(0, 3).join(' ');
+      const matched = patternRules.find((r) => r.test(query));
+      const pattern = matched?.key || query.split(' ').slice(0, 3).join(' ');
 
       if (!clusters[pattern]) {
         clusters[pattern] = [];

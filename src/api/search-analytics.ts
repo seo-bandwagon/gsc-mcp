@@ -272,30 +272,38 @@ export class SearchAnalyticsApi {
     period1Rows: SearchAnalyticsRow[],
     period2Rows: SearchAnalyticsRow[]
   ): ComparePeriodsResponse['rows'] {
-    // Create a map of period2 rows by key
+    // Index both periods by joined-key. The previous implementation iterated
+    // only period1, silently dropping any keys that appeared in period2 only
+    // (e.g., new queries that started ranking in the comparison window).
+    const period1Map = new Map<string, SearchAnalyticsRow>();
+    for (const row of period1Rows) {
+      period1Map.set(row.keys.join('|'), row);
+    }
     const period2Map = new Map<string, SearchAnalyticsRow>();
     for (const row of period2Rows) {
       period2Map.set(row.keys.join('|'), row);
     }
 
-    // Compare each row from period1 with period2
-    return period1Rows.map((row1) => {
-      const key = row1.keys.join('|');
+    const allKeys = new Set<string>([...period1Map.keys(), ...period2Map.keys()]);
+    const ZERO: PeriodMetrics = { clicks: 0, impressions: 0, ctr: 0, position: 0 };
+
+    const result: ComparePeriodsResponse['rows'] = [];
+    for (const key of allKeys) {
+      const row1 = period1Map.get(key);
       const row2 = period2Map.get(key);
+      // The `keys` array is the source of truth for the display key; prefer
+      // whichever row exists.
+      const displayKeys = (row1?.keys ?? row2?.keys ?? []).join(' | ');
 
-      const metrics1: PeriodMetrics = {
-        clicks: row1.clicks,
-        impressions: row1.impressions,
-        ctr: row1.ctr,
-        position: row1.position
-      };
-
+      const metrics1: PeriodMetrics = row1
+        ? { clicks: row1.clicks, impressions: row1.impressions, ctr: row1.ctr, position: row1.position }
+        : ZERO;
       const metrics2: PeriodMetrics = row2
         ? { clicks: row2.clicks, impressions: row2.impressions, ctr: row2.ctr, position: row2.position }
-        : { clicks: 0, impressions: 0, ctr: 0, position: 0 };
+        : ZERO;
 
-      return {
-        key: row1.keys.join(' | '),
+      result.push({
+        key: displayKeys,
         period1: metrics1,
         period2: metrics2,
         changes: {
@@ -304,8 +312,10 @@ export class SearchAnalyticsApi {
           ctr: this.calculateChange(metrics1.ctr, metrics2.ctr),
           position: this.calculateChange(metrics1.position, metrics2.position)
         }
-      };
-    });
+      });
+    }
+
+    return result;
   }
 
   private sortByMetric(rows: SearchAnalyticsRow[], metric: string): SearchAnalyticsRow[] {
@@ -338,30 +348,32 @@ export class SearchAnalyticsApi {
     queries: string[],
     type?: 'web' | 'image' | 'video' | 'news' | 'discover' | 'googleNews'
   ): Promise<Record<string, number[]>> {
-    // Fetch daily data for the specified queries
-    const data = await this.query({
-      siteUrl,
-      startDate,
-      endDate,
-      dimensions: ['query', 'date'],
-      filters: queries.length > 0 ? queries.map((q) => ({
-        dimension: 'query' as const,
-        operator: 'equals' as const,
-        expression: q
-      })) : undefined,
-      rowLimit: queries.length * 31, // Up to 31 days per query
-      type
-    });
+    // Fetch daily data per query in parallel. We can't OR-combine multiple
+    // `query equals` filters in a single GSC call — `dimensionFilterGroups`
+    // are AND'd, so a multi-query filter list matches zero rows. One call
+    // per query also gives us a tight rowLimit (one row per day per query).
+    if (queries.length === 0) return {};
 
-    // Group by query
     const trend: Record<string, number[]> = {};
 
-    for (const row of data.rows) {
-      const query = row.keys[0];
-      if (!trend[query]) {
-        trend[query] = [];
-      }
-      trend[query].push(row.clicks);
+    const perQuery = await Promise.all(
+      queries.map((q) =>
+        this.query({
+          siteUrl,
+          startDate,
+          endDate,
+          dimensions: ['query', 'date'],
+          filters: [{ dimension: 'query', operator: 'equals', expression: q }],
+          rowLimit: 366, // up to one row per day per query
+          type
+        }).then((data) => ({ query: q, rows: data.rows }))
+      )
+    );
+
+    for (const { query, rows } of perQuery) {
+      // Sort by date so the trend array is chronological
+      rows.sort((a, b) => (a.keys[1] || '').localeCompare(b.keys[1] || ''));
+      trend[query] = rows.map((r) => r.clicks);
     }
 
     return trend;
