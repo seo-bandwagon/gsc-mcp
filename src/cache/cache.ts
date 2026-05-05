@@ -94,7 +94,7 @@ export class Cache {
     this.store[key] = {
       data: JSON.stringify(data),
       timestamp: Date.now(),
-      ttl: ttl || 3600
+      ttl: ttl ?? 3600
     };
 
     this.save();

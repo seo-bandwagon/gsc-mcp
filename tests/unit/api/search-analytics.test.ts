@@ -540,4 +540,129 @@ describe('SearchAnalyticsApi', () => {
       expect(result.changes.clicks.percentage).toBe(0);
     });
   });
+
+  describe('comparePeriods row-level comparison (regression: period2-only rows)', () => {
+    it('includes rows that exist only in period2', async () => {
+      // Bug: compareRows iterated only period1Rows, dropping any new keys
+      // that appeared in period2. This is a major use case — surfacing
+      // queries/pages that started ranking in the comparison period.
+      mockSearchConsole.searchanalytics.query
+        .mockResolvedValueOnce({
+          data: {
+            rows: [
+              { keys: ['existing query'], clicks: 10, impressions: 100, ctr: 0.1, position: 5 }
+            ],
+            responseAggregationType: 'auto'
+          }
+        })
+        .mockResolvedValueOnce({
+          data: {
+            rows: [
+              { keys: ['existing query'], clicks: 15, impressions: 120, ctr: 0.125, position: 4 },
+              { keys: ['new query'], clicks: 8, impressions: 80, ctr: 0.1, position: 7 }
+            ],
+            responseAggregationType: 'auto'
+          }
+        });
+
+      const result = await api.comparePeriods({
+        siteUrl: 'example.com',
+        period1Start: '2025-01-01',
+        period1End: '2025-01-07',
+        period2Start: '2025-01-08',
+        period2End: '2025-01-14',
+        dimensions: ['query']
+      });
+
+      expect(result.rows).toBeDefined();
+      const newQueryRow = result.rows!.find((r) => r.key === 'new query');
+      expect(newQueryRow).toBeDefined();
+      expect(newQueryRow!.period1.clicks).toBe(0);
+      expect(newQueryRow!.period2.clicks).toBe(8);
+    });
+
+    it('includes rows that exist only in period1', async () => {
+      mockSearchConsole.searchanalytics.query
+        .mockResolvedValueOnce({
+          data: {
+            rows: [
+              { keys: ['old query'], clicks: 20, impressions: 200, ctr: 0.1, position: 6 }
+            ],
+            responseAggregationType: 'auto'
+          }
+        })
+        .mockResolvedValueOnce({
+          data: { rows: [], responseAggregationType: 'auto' }
+        });
+
+      const result = await api.comparePeriods({
+        siteUrl: 'example.com',
+        period1Start: '2025-01-01',
+        period1End: '2025-01-07',
+        period2Start: '2025-01-08',
+        period2End: '2025-01-14',
+        dimensions: ['query']
+      });
+
+      const oldQueryRow = result.rows!.find((r) => r.key === 'old query');
+      expect(oldQueryRow).toBeDefined();
+      expect(oldQueryRow!.period1.clicks).toBe(20);
+      expect(oldQueryRow!.period2.clicks).toBe(0);
+    });
+  });
+
+  describe('topQueries includeTrend (regression: AND-conjunction filter on multiple queries)', () => {
+    it('does not produce an AND-conjunction filter that matches no rows', async () => {
+      // Bug: getTrendData built a single filterGroup with all queries OR'd
+      // together — but the implementation hardcodes groupType='and' so
+      // `query equals A AND query equals B` matches zero rows. The fix is to
+      // make per-query parallel calls (one trend query at a time) so each
+      // call has at most one query filter.
+      mockSearchConsole.searchanalytics.query.mockReset();
+
+      // First call: topQueries() (dimensions=['query'])
+      mockSearchConsole.searchanalytics.query.mockResolvedValueOnce({
+        data: {
+          rows: [
+            { keys: ['query1'], clicks: 100, impressions: 1000, ctr: 0.1, position: 3 },
+            { keys: ['query2'], clicks: 80, impressions: 800, ctr: 0.1, position: 4 }
+          ],
+          responseAggregationType: 'auto'
+        }
+      });
+      // Subsequent calls: per-query trend fetches
+      mockSearchConsole.searchanalytics.query.mockResolvedValue({
+        data: { rows: [], responseAggregationType: 'auto' }
+      });
+
+      await api.topQueries({
+        siteUrl: 'example.com',
+        startDate: '2025-01-01',
+        endDate: '2025-01-14',
+        limit: 10,
+        metric: 'clicks',
+        includeTrend: true
+      });
+
+      // Inspect the trend-related calls: every dimensionFilterGroups should
+      // contain exactly ONE filter (not multiple ANDed query=X filters).
+      const calls = mockSearchConsole.searchanalytics.query.mock.calls;
+      const trendCalls = calls.filter((c) => {
+        const body = c[0]?.requestBody as Record<string, unknown> | undefined;
+        const dims = body?.dimensions as string[] | undefined;
+        return Array.isArray(dims) && dims.includes('date');
+      });
+
+      expect(trendCalls.length).toBeGreaterThan(0);
+      for (const call of trendCalls) {
+        const body = call[0]?.requestBody as Record<string, unknown>;
+        const groups = body?.dimensionFilterGroups as Array<{ filters: unknown[] }> | undefined;
+        if (groups && groups.length > 0) {
+          for (const group of groups) {
+            expect(group.filters.length).toBeLessThanOrEqual(1);
+          }
+        }
+      }
+    });
+  });
 });
