@@ -1,7 +1,8 @@
 import type { Tool, ToolHandler } from './types.js';
-import { ok } from './types.js';
+import { okFormatted, RESPONSE_FORMAT_PROP } from './types.js';
 import type { GSCClient } from '../api/client.js';
 import { handleToolError } from '../utils/errors.js';
+import { ResponseFormatSchema } from '../types/index.js';
 
 export function createCacheTools(client: GSCClient): { tools: Tool[]; handlers: Map<string, ToolHandler> } {
   const handlers = new Map<string, ToolHandler>();
@@ -17,7 +18,8 @@ export function createCacheTools(client: GSCClient): { tools: Tool[]; handlers: 
             type: 'string',
             enum: ['all', 'searchAnalytics', 'sites', 'sitemaps', 'urlInspection'],
             description: 'Which cache namespace to clear. Default all.'
-          }
+          },
+          response_format: RESPONSE_FORMAT_PROP
         },
         additionalProperties: false
       },
@@ -52,13 +54,18 @@ export function createCacheTools(client: GSCClient): { tools: Tool[]; handlers: 
         cleared = cache.clearByPrefix(cacheType);
       }
 
-      return ok({
-        success: true,
-        message: cacheType === 'all'
-          ? 'All cache cleared successfully'
-          : `Cleared ${cleared} cached entries for ${cacheType}`,
-        cacheType
-      });
+      const format = ResponseFormatSchema.parse(args.response_format ?? undefined);
+      return okFormatted(
+        {
+          success: true,
+          message: cacheType === 'all'
+            ? 'All cache cleared successfully'
+            : `Cleared ${cleared} cached entries for ${cacheType}`,
+          cacheType
+        },
+        format,
+        (d) => d.message
+      );
     } catch (error) {
       return handleToolError(error);
     }

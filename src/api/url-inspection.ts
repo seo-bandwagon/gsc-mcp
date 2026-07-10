@@ -44,34 +44,38 @@ export class UrlInspectionApi {
 
     const inspectionResult = result.inspectionResult;
 
+    // Google's enums change over time (e.g. VERDICT_UNSPECIFIED, PARTIAL show up in live
+    // responses). Values pass through verbatim; only genuinely missing fields get the
+    // documented 'UNKNOWN' fallback. Never coerce unknown values into known ones — a
+    // fabricated 'NEUTRAL' is worse than an honest unknown.
     const response: UrlInspectionResponse = {
       inspectionResult: {
         inspectionResultLink: inspectionResult?.inspectionResultLink || '',
         indexStatusResult: {
-          verdict: (inspectionResult?.indexStatusResult?.verdict as InspectionResult['indexStatusResult']['verdict']) || 'NEUTRAL',
-          coverageState: inspectionResult?.indexStatusResult?.coverageState || 'Unknown',
-          robotsTxtState: (inspectionResult?.indexStatusResult?.robotsTxtState as InspectionResult['indexStatusResult']['robotsTxtState']) || 'ALLOWED',
-          indexingState: (inspectionResult?.indexStatusResult?.indexingState as InspectionResult['indexStatusResult']['indexingState']) || 'INDEXING_ALLOWED',
+          verdict: inspectionResult?.indexStatusResult?.verdict || 'UNKNOWN',
+          coverageState: inspectionResult?.indexStatusResult?.coverageState || 'UNKNOWN',
+          robotsTxtState: inspectionResult?.indexStatusResult?.robotsTxtState || 'UNKNOWN',
+          indexingState: inspectionResult?.indexStatusResult?.indexingState || 'UNKNOWN',
           lastCrawlTime: inspectionResult?.indexStatusResult?.lastCrawlTime || undefined,
-          pageFetchState: (inspectionResult?.indexStatusResult?.pageFetchState as InspectionResult['indexStatusResult']['pageFetchState']) || 'SUCCESSFUL',
+          pageFetchState: inspectionResult?.indexStatusResult?.pageFetchState || 'UNKNOWN',
           googleCanonical: inspectionResult?.indexStatusResult?.googleCanonical || undefined,
           userCanonical: inspectionResult?.indexStatusResult?.userCanonical || undefined,
           referringUrls: inspectionResult?.indexStatusResult?.referringUrls || undefined,
-          crawledAs: inspectionResult?.indexStatusResult?.crawledAs as 'DESKTOP' | 'MOBILE' | undefined
+          crawledAs: inspectionResult?.indexStatusResult?.crawledAs || undefined
         },
         mobileUsabilityResult: inspectionResult?.mobileUsabilityResult
           ? {
-              verdict: (inspectionResult.mobileUsabilityResult.verdict as 'PASS' | 'NEUTRAL' | 'FAIL') || 'NEUTRAL',
+              verdict: inspectionResult.mobileUsabilityResult.verdict || 'UNKNOWN',
               issues: (inspectionResult.mobileUsabilityResult.issues || []).map((issue) => ({
                 issueType: issue.issueType || 'UNKNOWN',
-                severity: (issue.severity as 'WARNING' | 'ERROR') || 'WARNING',
+                severity: issue.severity || 'UNKNOWN',
                 message: issue.message || ''
               }))
             }
           : undefined,
         richResultsResult: inspectionResult?.richResultsResult
           ? {
-              verdict: (inspectionResult.richResultsResult.verdict as 'PASS' | 'NEUTRAL' | 'FAIL') || 'NEUTRAL',
+              verdict: inspectionResult.richResultsResult.verdict || 'UNKNOWN',
               detectedItems: (inspectionResult.richResultsResult.detectedItems || []).map((item) => ({
                 richResultType: item.richResultType || 'Unknown',
                 items: (item.items || []).map((i) => ({ name: i.name || '' }))

@@ -1,12 +1,23 @@
 import type { Tool, ToolHandler } from './types.js';
-import { ok } from './types.js';
+import { okFormatted, RESPONSE_FORMAT_PROP } from './types.js';
 import type { AnalysisApi } from '../api/analysis.js';
 import { handleToolError } from '../utils/errors.js';
+import { toMarkdown } from '../utils/markdown.js';
 import {
+  ResponseFormatSchema,
   AnalyzeOpportunitiesQuerySchema,
   ContentGapsQuerySchema,
   CannibalizationQuerySchema
 } from '../types/index.js';
+
+function parseFormat(args: Record<string, unknown>) {
+  return ResponseFormatSchema.parse(args.response_format ?? undefined);
+}
+
+function stripFormat(args: Record<string, unknown>): Record<string, unknown> {
+  const { response_format: _ignored, ...rest } = args;
+  return rest;
+}
 
 const OPPORTUNITY_SHAPE = {
   type: 'object',
@@ -46,7 +57,8 @@ export function createAnalysisTools(analysisApi: AnalysisApi): { tools: Tool[]; 
             type: 'array',
             items: { type: 'string', enum: ['rankings', 'ctr', 'coverage', 'mobile'] },
             description: 'Narrow the analysis to specific areas. Omit to cover all.'
-          }
+          },
+          response_format: RESPONSE_FORMAT_PROP
         },
         required: ['siteUrl'],
         additionalProperties: false
@@ -91,7 +103,8 @@ export function createAnalysisTools(analysisApi: AnalysisApi): { tools: Tool[]; 
           siteUrl: { type: 'string', description: 'The verified property URL.' },
           startDate: { type: 'string', description: 'Analysis window start (YYYY-MM-DD).' },
           endDate: { type: 'string', description: 'Analysis window end (YYYY-MM-DD).' },
-          minImpressions: { type: 'number', description: 'Minimum impressions per query to include. Default 1.' }
+          minImpressions: { type: 'number', description: 'Minimum impressions per query to include. Default 1.' },
+          response_format: RESPONSE_FORMAT_PROP
         },
         required: ['siteUrl', 'startDate', 'endDate'],
         additionalProperties: false
@@ -128,7 +141,8 @@ export function createAnalysisTools(analysisApi: AnalysisApi): { tools: Tool[]; 
           siteUrl: { type: 'string', description: 'The verified property URL.' },
           startDate: { type: 'string', description: 'Analysis window start (YYYY-MM-DD).' },
           endDate: { type: 'string', description: 'Analysis window end (YYYY-MM-DD).' },
-          minPages: { type: 'number', description: 'Minimum pages ranking for the same query to flag it. Default 2.' }
+          minPages: { type: 'number', description: 'Minimum pages ranking for the same query to flag it. Default 2.' },
+          response_format: RESPONSE_FORMAT_PROP
         },
         required: ['siteUrl', 'startDate', 'endDate'],
         additionalProperties: false
@@ -169,8 +183,9 @@ export function createAnalysisTools(analysisApi: AnalysisApi): { tools: Tool[]; 
 
   handlers.set('gsc_analyze_opportunities', async (args) => {
     try {
-      const params = AnalyzeOpportunitiesQuerySchema.parse(args);
-      return ok(await analysisApi.analyzeOpportunities(params));
+      const format = parseFormat(args);
+      const params = AnalyzeOpportunitiesQuerySchema.parse(stripFormat(args));
+      return okFormatted(await analysisApi.analyzeOpportunities(params), format, (d) => `## SEO opportunities\n\n${toMarkdown(d, 3)}`);
     } catch (error) {
       return handleToolError(error);
     }
@@ -178,8 +193,9 @@ export function createAnalysisTools(analysisApi: AnalysisApi): { tools: Tool[]; 
 
   handlers.set('gsc_content_gaps', async (args) => {
     try {
-      const params = ContentGapsQuerySchema.parse(args);
-      return ok(await analysisApi.findContentGaps(params));
+      const format = parseFormat(args);
+      const params = ContentGapsQuerySchema.parse(stripFormat(args));
+      return okFormatted(await analysisApi.findContentGaps(params), format, (d) => `## Content gaps\n\n${toMarkdown(d, 3)}`);
     } catch (error) {
       return handleToolError(error);
     }
@@ -187,8 +203,9 @@ export function createAnalysisTools(analysisApi: AnalysisApi): { tools: Tool[]; 
 
   handlers.set('gsc_cannibalization_check', async (args) => {
     try {
-      const params = CannibalizationQuerySchema.parse(args);
-      return ok(await analysisApi.checkCannibalization(params));
+      const format = parseFormat(args);
+      const params = CannibalizationQuerySchema.parse(stripFormat(args));
+      return okFormatted(await analysisApi.checkCannibalization(params), format, (d) => `## Cannibalization check\n\n${toMarkdown(d, 3)}`);
     } catch (error) {
       return handleToolError(error);
     }

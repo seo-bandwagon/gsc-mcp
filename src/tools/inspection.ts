@@ -1,27 +1,46 @@
 import type { Tool, ToolHandler } from './types.js';
-import { ok } from './types.js';
+import { okFormatted, RESPONSE_FORMAT_PROP } from './types.js';
 import type { UrlInspectionApi } from '../api/url-inspection.js';
 import { handleToolError } from '../utils/errors.js';
+import { toMarkdown } from '../utils/markdown.js';
 import {
+  ResponseFormatSchema,
   InspectUrlQuerySchema,
   BulkInspectQuerySchema
 } from '../types/index.js';
 
-const VERDICT_ENUM = ['PASS', 'NEUTRAL', 'FAIL'];
+function parseFormat(args: Record<string, unknown>) {
+  return ResponseFormatSchema.parse(args.response_format ?? undefined);
+}
+
+function stripFormat(args: Record<string, unknown>): Record<string, unknown> {
+  const { response_format: _ignored, ...rest } = args;
+  return rest;
+}
+
+// Google's enums grow over time — VERDICT_UNSPECIFIED, PARTIAL, and other values show
+// up in live responses. Output schemas therefore document known values in descriptions
+// instead of hard enums; unknown values pass through verbatim, with 'UNKNOWN' as the
+// fallback for genuinely missing fields. A strict enum here fails closed on read-only
+// data, which turns a new Google value into a tool crash.
+const VERDICT = {
+  type: 'string',
+  description: 'Known values: PASS, PARTIAL, FAIL, NEUTRAL, VERDICT_UNSPECIFIED. Other values pass through as-is; UNKNOWN means the API omitted the field.'
+} as const;
 
 const INDEX_STATUS = {
   type: 'object',
   properties: {
-    verdict: { type: 'string', enum: VERDICT_ENUM },
+    verdict: VERDICT,
     coverageState: { type: 'string' },
-    robotsTxtState: { type: 'string', enum: ['ALLOWED', 'DISALLOWED'] },
-    indexingState: { type: 'string', enum: ['INDEXING_ALLOWED', 'BLOCKED_BY_META_TAG', 'BLOCKED_BY_HTTP_HEADER', 'RESERVED'] },
+    robotsTxtState: { type: 'string', description: 'Known values: ALLOWED, DISALLOWED, ROBOTS_TXT_STATE_UNSPECIFIED. Others pass through.' },
+    indexingState: { type: 'string', description: 'Known values: INDEXING_ALLOWED, BLOCKED_BY_META_TAG, BLOCKED_BY_HTTP_HEADER, BLOCKED_BY_ROBOTS_TXT, INDEXING_STATE_UNSPECIFIED. Others pass through.' },
     lastCrawlTime: { type: 'string' },
-    pageFetchState: { type: 'string' },
+    pageFetchState: { type: 'string', description: 'Known values: SUCCESSFUL, SOFT_404, BLOCKED_ROBOTS_TXT, NOT_FOUND, ACCESS_DENIED, SERVER_ERROR, REDIRECT_ERROR, ACCESS_FORBIDDEN, BLOCKED_4XX, INTERNAL_CRAWL_ERROR, INVALID_URL. Others pass through.' },
     googleCanonical: { type: 'string' },
     userCanonical: { type: 'string' },
     referringUrls: { type: 'array', items: { type: 'string' } },
-    crawledAs: { type: 'string', enum: ['DESKTOP', 'MOBILE'] }
+    crawledAs: { type: 'string', description: 'Known values: DESKTOP, MOBILE. Others pass through.' }
   },
   required: ['verdict', 'coverageState', 'robotsTxtState', 'indexingState', 'pageFetchState']
 } as const;
@@ -34,14 +53,14 @@ const INSPECTION_RESULT = {
     mobileUsabilityResult: {
       type: 'object',
       properties: {
-        verdict: { type: 'string', enum: VERDICT_ENUM },
+        verdict: VERDICT,
         issues: {
           type: 'array',
           items: {
             type: 'object',
             properties: {
               issueType: { type: 'string' },
-              severity: { type: 'string', enum: ['WARNING', 'ERROR'] },
+              severity: { type: 'string', description: 'Known values: WARNING, ERROR. Others pass through.' },
               message: { type: 'string' }
             },
             required: ['issueType', 'severity', 'message']
@@ -53,7 +72,7 @@ const INSPECTION_RESULT = {
     richResultsResult: {
       type: 'object',
       properties: {
-        verdict: { type: 'string', enum: VERDICT_ENUM },
+        verdict: VERDICT,
         detectedItems: { type: 'array' }
       }
     }
@@ -72,7 +91,8 @@ export function createInspectionTools(urlInspectionApi: UrlInspectionApi): { too
         type: 'object',
         properties: {
           siteUrl: { type: 'string', description: 'The verified property that owns the URL.' },
-          inspectionUrl: { type: 'string', description: 'The absolute URL to inspect. Must belong to the property.' }
+          inspectionUrl: { type: 'string', description: 'The absolute URL to inspect. Must belong to the property.' },
+          response_format: RESPONSE_FORMAT_PROP
         },
         required: ['siteUrl', 'inspectionUrl'],
         additionalProperties: false
@@ -97,7 +117,8 @@ export function createInspectionTools(urlInspectionApi: UrlInspectionApi): { too
             description: 'Absolute URLs to inspect. Max 100.',
             minItems: 1,
             maxItems: 100
-          }
+          },
+          response_format: RESPONSE_FORMAT_PROP
         },
         required: ['siteUrl', 'urls'],
         additionalProperties: false
@@ -134,8 +155,9 @@ export function createInspectionTools(urlInspectionApi: UrlInspectionApi): { too
 
   handlers.set('gsc_inspect_url', async (args) => {
     try {
-      const params = InspectUrlQuerySchema.parse(args);
-      return ok(await urlInspectionApi.inspectUrl(params));
+      const format = parseFormat(args);
+      const params = InspectUrlQuerySchema.parse(stripFormat(args));
+      return okFormatted(await urlInspectionApi.inspectUrl(params), format, (d) => `## URL inspection\n\n${toMarkdown(d.inspectionResult, 3)}`);
     } catch (error) {
       return handleToolError(error);
     }
@@ -143,8 +165,9 @@ export function createInspectionTools(urlInspectionApi: UrlInspectionApi): { too
 
   handlers.set('gsc_bulk_inspect', async (args) => {
     try {
-      const params = BulkInspectQuerySchema.parse(args);
-      return ok(await urlInspectionApi.bulkInspect(params));
+      const format = parseFormat(args);
+      const params = BulkInspectQuerySchema.parse(stripFormat(args));
+      return okFormatted(await urlInspectionApi.bulkInspect(params), format, (d) => `## Bulk inspection (${d.summary.success} ok, ${d.summary.failed} failed)\n\n${toMarkdown(d.results, 3)}`);
     } catch (error) {
       return handleToolError(error);
     }

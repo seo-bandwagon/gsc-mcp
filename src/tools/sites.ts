@@ -1,7 +1,9 @@
 import type { Tool, ToolHandler } from './types.js';
-import { ok } from './types.js';
+import { okFormatted, RESPONSE_FORMAT_PROP } from './types.js';
 import type { SitesApi } from '../api/sites.js';
 import { handleToolError } from '../utils/errors.js';
+import { tableFromObjects } from '../utils/markdown.js';
+import { ResponseFormatSchema } from '../types/index.js';
 
 export function createSitesTools(sitesApi: SitesApi): { tools: Tool[]; handlers: Map<string, ToolHandler> } {
   const handlers = new Map<string, ToolHandler>();
@@ -12,7 +14,9 @@ export function createSitesTools(sitesApi: SitesApi): { tools: Tool[]; handlers:
       description: 'List all verified sites (properties) in your Google Search Console account.',
       inputSchema: {
         type: 'object',
-        properties: {},
+        properties: {
+          response_format: RESPONSE_FORMAT_PROP
+        },
         additionalProperties: false
       },
       outputSchema: {
@@ -43,10 +47,11 @@ export function createSitesTools(sitesApi: SitesApi): { tools: Tool[]; handlers:
     }
   ];
 
-  handlers.set('gsc_list_sites', async () => {
+  handlers.set('gsc_list_sites', async (args) => {
     try {
+      const format = ResponseFormatSchema.parse(args.response_format ?? undefined);
       const result = await sitesApi.listSites();
-      return ok(result);
+      return okFormatted(result, format, (d) => `## Verified sites\n\n${tableFromObjects(d.sites.map((s) => ({ ...s })))}`);
     } catch (error) {
       return handleToolError(error);
     }

@@ -73,7 +73,8 @@ describe('SearchAnalyticsApi', () => {
       });
 
       expect(result.rows).toHaveLength(mockSearchAnalyticsRows.length);
-      expect(result.responseAggregationType).toBe('auto');
+      // 'auto' is never echoed — the effective aggregation is resolved explicitly.
+      expect(result.aggregation_type).toBe('byProperty');
     });
 
     it('defaults to web search type', async () => {
@@ -223,7 +224,8 @@ describe('SearchAnalyticsApi', () => {
         clicks: 0,
         impressions: 0,
         ctr: 0,
-        position: 0
+        position: 0,
+        sum_position: 0
       });
     });
 

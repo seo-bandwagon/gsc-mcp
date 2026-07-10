@@ -53,6 +53,24 @@ export function ok<T>(data: T): ToolResult {
   };
 }
 
+/**
+ * Helper: build a success result honoring a response_format choice.
+ * structuredContent is always the JSON payload; only the text rendering changes.
+ */
+export function okFormatted<T>(data: T, format: 'json' | 'markdown', renderMarkdown: (data: T) => string): ToolResult {
+  return {
+    text: format === 'markdown' ? renderMarkdown(data) : JSON.stringify(data, null, 2),
+    structured: data as unknown
+  };
+}
+
+/** JSON-schema property snippet for the shared response_format input. */
+export const RESPONSE_FORMAT_PROP = {
+  type: 'string',
+  enum: ['json', 'markdown'],
+  description: 'Rendering of the text content. structuredContent is always JSON. Default markdown.'
+} as const;
+
 /** Helper: build an error result. Text is JSON-stringified for consistency with success path. */
 export function err(error: { code: string; message: string; details?: unknown }): ToolResult {
   return {

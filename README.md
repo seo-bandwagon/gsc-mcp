@@ -57,22 +57,34 @@ Restart your client.
 
 ## What this does
 
-**15 tools across 6 surfaces:**
+**20 tools across 7 surfaces:**
 
 | Surface | Tools |
 |---|---|
 | Sites | `gsc_list_sites` |
 | Search analytics | `gsc_search_analytics`, `gsc_top_queries`, `gsc_top_pages`, `gsc_compare_periods` |
+| Accuracy & coverage | `gsc_verify_data_availability`, `gsc_accurate_totals`, `gsc_coverage_report`, `gsc_search_appearance`, `gsc_query_page_pairs` |
 | URL inspection | `gsc_inspect_url`, `gsc_bulk_inspect` |
-| Sitemaps | `gsc_list_sitemaps`, `gsc_submit_sitemap`, `gsc_delete_sitemap`, `gsc_index_coverage` |
+| Sitemaps | `gsc_list_sitemaps`, `gsc_submit_sitemap`, `gsc_delete_sitemap`, `gsc_sitemap_indexation_summary` |
 | SEO analysis | `gsc_analyze_opportunities`, `gsc_content_gaps`, `gsc_cannibalization_check` |
 | Cache | `gsc_clear_cache` |
 
 All read-only tools are annotated with `readOnlyHint` + `idempotentHint`. `gsc_delete_sitemap` is flagged `destructiveHint` and asks for confirmation. Every tool emits `structuredContent` matching a declared `outputSchema`, so clients that support structured tool output can filter and compose results directly.
 
-**Prompts included** for one-line workflows: `analyze-site`, `weekly-report`, `find-quick-wins`.
+**Built so an agent cannot silently produce wrong numbers.** Google's Search Console API loses data in specific, documented, deterministic ways; this server surfaces those losses instead of letting them hide:
 
-**Resources exposed** at `gsc://sites`, `gsc://site/<url>/summary`, `gsc://site/<url>/alerts` for clients that surface resources.
+- Every impression count carries its `aggregation_type` (`byProperty` vs `byPage` count different units — 1,076 vs 1,208 on the same week of the same property).
+- Complete internal pagination by default (`startRow += 25,000` until exhaustion); top-N tools rank over the *full* row set before applying `limit`.
+- `gsc_coverage_report` measures the rows Google drops from query/page-grained pulls (~86% query coverage is typical) so analyses state what they're blind to.
+- Rows carry additive `sum_position` so average position can be decomposed/recombined correctly.
+- The 50,000 rows/day/search-type exposure ceiling sets `row_ceiling_reached` plus a warning naming the dropped tail.
+- Quota errors return the remedy, not just the status.
+
+**Prompts included** for one-line workflows: `gsc_daily_pull`, `gsc_coverage_audit`, `gsc_position_decomposition`, `analyze-site`, `weekly-report`, `find-quick-wins`.
+
+**Resources exposed**: guidance at `gsc://guidance/aggregation`, `gsc://guidance/data-loss`, `gsc://guidance/quota`, `gsc://guidance/position`, and `gsc://schema/dimensions`; plus `gsc://sites`, `gsc://site/<url>/summary`, `gsc://site/<url>/alerts`.
+
+Migrating from v0.1.x? Field/tool renames are listed in [docs/MIGRATION.md](docs/MIGRATION.md).
 
 ## What this does NOT do
 

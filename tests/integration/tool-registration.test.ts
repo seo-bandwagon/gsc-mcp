@@ -96,9 +96,9 @@ describe('tool registration end-to-end', () => {
     ({ tools, handlers } = createTools(client));
   });
 
-  it('registers exactly 15 tools', () => {
-    expect(tools).toHaveLength(15);
-    expect(handlers.size).toBe(15);
+  it('registers exactly 20 tools', () => {
+    expect(tools).toHaveLength(20);
+    expect(handlers.size).toBe(20);
   });
 
   it('every tool has a handler', () => {
@@ -149,10 +149,15 @@ describe('tool registration end-to-end', () => {
       'gsc_inspect_url',
       'gsc_bulk_inspect',
       'gsc_list_sitemaps',
-      'gsc_index_coverage',
+      'gsc_sitemap_indexation_summary',
       'gsc_analyze_opportunities',
       'gsc_content_gaps',
-      'gsc_cannibalization_check'
+      'gsc_cannibalization_check',
+      'gsc_verify_data_availability',
+      'gsc_accurate_totals',
+      'gsc_coverage_report',
+      'gsc_search_appearance',
+      'gsc_query_page_pairs'
     ];
     for (const name of readOnlyNames) {
       const tool = tools.find((t) => t.name === name);
@@ -161,18 +166,21 @@ describe('tool registration end-to-end', () => {
   });
 
   describe('handler outputs conform to ToolResult shape', () => {
-    it('gsc_list_sites returns structured sites array', async () => {
+    it('gsc_list_sites returns structured sites array (json format) and markdown by default', async () => {
       const handler = handlers.get('gsc_list_sites')!;
-      const result = await handler({});
 
-      expect(result.isError).toBeFalsy();
-      expect(typeof result.text).toBe('string');
-      const parsed = JSON.parse(result.text);
+      const jsonResult = await handler({ response_format: 'json' });
+      expect(jsonResult.isError).toBeFalsy();
+      const parsed = JSON.parse(jsonResult.text);
       expect(Array.isArray(parsed.sites)).toBe(true);
       expect(parsed.sites.length).toBeGreaterThan(0);
-
-      const structured = result.structured as { sites: unknown[] };
+      const structured = jsonResult.structured as { sites: unknown[] };
       expect(structured.sites).toEqual(parsed.sites);
+
+      // Default text rendering is markdown; structuredContent is unchanged.
+      const mdResult = await handler({});
+      expect(mdResult.text).toContain('|');
+      expect(mdResult.structured).toEqual(jsonResult.structured);
     });
 
     it('gsc_top_queries returns structured rows', async () => {

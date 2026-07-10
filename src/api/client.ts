@@ -88,8 +88,11 @@ export class GSCClient {
             message
           });
 
-          // Rate limit - wait and retry
+          // Rate limit - wait and retry, then fail with the remedy rather than the status
           if (status === 429) {
+            if (attempt >= maxRetries - 1) {
+              throw this.quotaError(endpoint, message);
+            }
             const retryAfter = parseInt(error.response?.headers?.['retry-after'] || '60', 10);
             this.logger.warn(`Rate limited on ${endpoint}. Waiting ${retryAfter}s before retry`);
             await this.sleep(retryAfter * 1000);
@@ -114,8 +117,13 @@ export class GSCClient {
             }
           }
 
-          // Permission denied
+          // 403 covers both quota exhaustion and permission problems — split on the reason
           if (status === 403) {
+            const reason = error.response?.data?.error?.errors?.[0]?.reason || '';
+            if (/quota|rateLimit|userRateLimit/i.test(reason) || /quota/i.test(message)) {
+              this.logger.error('Quota exceeded (403)', { endpoint, reason, message });
+              throw this.quotaError(endpoint, message);
+            }
             this.logger.error('Permission denied (403)', { endpoint, message });
             throw new GSCApiError({
               code: 'PERMISSION_DENIED',
@@ -177,10 +185,24 @@ export class GSCClient {
     throw lastError || new Error('Unknown error occurred');
   }
 
+  /** Actionable quota error: the remedy, not just the status. */
+  private quotaError(endpoint: string, originalMessage: string): GSCApiError {
+    return new GSCApiError({
+      code: 'QUOTA_EXCEEDED',
+      retryAfter: 900,
+      message:
+        'Load quota exceeded. Short-term quota resets in ~15 minutes — wait and retry, or spread queries out. ' +
+        "If a single query triggers this, it's long-term load: remove the 'page' and/or 'query' dimension, or " +
+        'shorten the date range — load scales with range length, and page/query grouping is the most expensive. ' +
+        'Avoid requerying the same data. See gsc://guidance/quota.',
+      details: { endpoint, originalError: originalMessage }
+    });
+  }
+
   private isGoogleApiError(error: unknown): error is {
     response?: {
       status?: number;
-      data?: { error?: { message?: string } };
+      data?: { error?: { message?: string; errors?: Array<{ reason?: string }> } };
       headers?: Record<string, string>;
     };
     message: string;

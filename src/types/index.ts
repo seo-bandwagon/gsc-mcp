@@ -62,12 +62,31 @@ export interface SearchAnalyticsRow {
   impressions: number;
   ctr: number;
   position: number;
+  /** Derived: impressions × position. Additive across any grouping, unlike `position`. */
+  sum_position: number;
 }
+
+/** The aggregation unit Google actually used. Never 'auto' — always the resolved value. */
+export type EffectiveAggregation = 'byPage' | 'byProperty';
 
 export interface SearchAnalyticsResponse {
   rows: SearchAnalyticsRow[];
-  responseAggregationType: 'auto' | 'byPage' | 'byProperty';
+  /** Effective aggregation echoed from the API. byProperty and byPage count impressions differently — never compare across the two. */
+  aggregation_type: EffectiveAggregation;
+  /** Rows in this response. */
+  count: number;
+  /** Total rows the API exposes for this query. Present only when the server paginated to completeness. */
+  total_count?: number;
+  has_more: boolean;
+  /** startRow to pass to fetch the next page. Present only when has_more. */
+  next_offset?: number;
+  /** True when the pull hit Google's 50,000-rows/day/search-type exposure ceiling. Rows beyond it are dropped by Google in click-descending order (the lowest-click rows are lost). */
+  row_ceiling_reached: boolean;
+  warnings: string[];
 }
+
+export const ResponseFormatSchema = z.enum(['json', 'markdown']).default('markdown');
+export type ResponseFormat = z.infer<typeof ResponseFormatSchema>;
 
 export const SearchAnalyticsQuerySchema = z.object({
   siteUrl: z.string(),
@@ -85,6 +104,113 @@ export const SearchAnalyticsQuerySchema = z.object({
 
 export type SearchAnalyticsQuery = z.infer<typeof SearchAnalyticsQuerySchema>;
 
+// Data availability preflight
+export const VerifyDataAvailabilityQuerySchema = z.object({
+  siteUrl: z.string(),
+  lookbackDays: z.number().min(2).max(60).optional().default(10),
+  type: SearchTypeSchema.optional()
+});
+
+export type VerifyDataAvailabilityQuery = z.infer<typeof VerifyDataAvailabilityQuerySchema>;
+
+export interface DataAvailabilityDay {
+  date: string;
+  clicks: number;
+  impressions: number;
+  is_final: boolean;
+}
+
+export interface DataAvailabilityResponse {
+  days: DataAvailabilityDay[];
+  /** Most recent date with finalized data. Anything later is provisional or absent. */
+  latest_final_date: string | null;
+  /** Dates with fresh (still-changing) data only. */
+  provisional_dates: string[];
+  warnings: string[];
+}
+
+// Accurate totals (the ground-truth denominator)
+export const AccurateTotalsQuerySchema = z.object({
+  siteUrl: z.string(),
+  startDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  endDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  aggregationType: z.enum(['byPage', 'byProperty']),
+  dimensions: z.array(z.enum(['country', 'device'])).optional(),
+  dataState: z.enum(['all', 'final']).optional(),
+  type: SearchTypeSchema.optional()
+});
+
+export type AccurateTotalsQuery = z.infer<typeof AccurateTotalsQuerySchema>;
+
+export interface AccurateTotalsResponse {
+  totals: {
+    clicks: number;
+    impressions: number;
+    /** Derived: clicks / impressions. */
+    ctr: number;
+    /** Derived: impression-weighted average position (= sum_position / impressions). */
+    position: number;
+    sum_position: number;
+  };
+  aggregation_type: EffectiveAggregation;
+  rows?: SearchAnalyticsRow[];
+  warnings: string[];
+}
+
+// Coverage report
+export const CoverageReportQuerySchema = z.object({
+  siteUrl: z.string(),
+  startDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  endDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  entityType: z.enum(['query', 'page', 'query_page']),
+  type: SearchTypeSchema.optional()
+});
+
+export type CoverageReportQuery = z.infer<typeof CoverageReportQuerySchema>;
+
+export interface CoverageReportResponse {
+  entity_type: 'query' | 'page' | 'query_page';
+  /** Property-level impressions from the matching accurate-totals pull (no page/query dimensions). */
+  property_impressions: number;
+  /** Sum of impressions across the detail rows. */
+  entity_impressions: number;
+  /** Derived: entity_impressions / property_impressions × 100. */
+  coverage_pct: number;
+  /** Derived: property_impressions − entity_impressions. Impressions invisible at this grain. */
+  dropped_impressions: number;
+  entity_row_count: number;
+  aggregation_type: EffectiveAggregation;
+  warnings: string[];
+}
+
+// Search appearance
+export const SearchAppearanceQuerySchema = z.object({
+  siteUrl: z.string(),
+  startDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  endDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  dimensions: z.array(z.enum(['query', 'page', 'country', 'device', 'date'])).optional(),
+  type: SearchTypeSchema.optional()
+});
+
+export type SearchAppearanceQuery = z.infer<typeof SearchAppearanceQuerySchema>;
+
+export interface SearchAppearanceResponse {
+  appearance_types: SearchAnalyticsRow[];
+  breakdowns: { appearance_type: string; rows: SearchAnalyticsRow[] }[];
+  aggregation_type: EffectiveAggregation;
+  warnings: string[];
+}
+
+// Query-page pairs
+export const QueryPagePairsQuerySchema = z.object({
+  siteUrl: z.string(),
+  startDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  endDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  type: SearchTypeSchema.optional()
+});
+
+export type QueryPagePairsQuery = z.infer<typeof QueryPagePairsQuerySchema>;
+
 // Compare periods types
 export interface PeriodMetrics {
   clicks: number;
@@ -99,6 +225,9 @@ export interface MetricChange {
 }
 
 export interface ComparePeriodsResponse {
+  /** Effective aggregation used for both periods. */
+  aggregation_type: EffectiveAggregation;
+  warnings: string[];
   period1: PeriodMetrics;
   period2: PeriodMetrics;
   changes: {
@@ -128,31 +257,31 @@ export const ComparePeriodsQuerySchema = z.object({
   period2End: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
   dimensions: z.array(DimensionSchema).optional(),
   filters: z.array(SearchAnalyticsFilterSchema).optional(),
+  aggregationType: z.enum(['auto', 'byPage', 'byProperty']).optional(),
   type: SearchTypeSchema.optional()
 });
 
 export type ComparePeriodsQuery = z.infer<typeof ComparePeriodsQuerySchema>;
 
-// URL Inspection types
-export type InspectionVerdict = 'PASS' | 'NEUTRAL' | 'FAIL';
-export type RobotsTxtState = 'ALLOWED' | 'DISALLOWED';
-export type IndexingState = 'INDEXING_ALLOWED' | 'BLOCKED_BY_META_TAG' | 'BLOCKED_BY_HTTP_HEADER' | 'RESERVED';
-export type PageFetchState =
-  | 'SUCCESSFUL'
-  | 'SOFT_404'
-  | 'BLOCKED_ROBOTS_TXT'
-  | 'NOT_FOUND'
-  | 'ACCESS_DENIED'
-  | 'SERVER_ERROR'
-  | 'REDIRECT_ERROR'
-  | 'ACCESS_FORBIDDEN'
-  | 'BLOCKED_4XX'
-  | 'INTERNAL_CRAWL_ERROR'
-  | 'INVALID_URL';
+// URL Inspection types.
+//
+// Google's enums grow over time and undocumented values (e.g. VERDICT_UNSPECIFIED,
+// PARTIAL) appear in live responses. These are open string types with the known
+// values documented — unknown values pass through verbatim rather than failing
+// closed on read-only data.
+/** Known values: PASS, PARTIAL, FAIL, NEUTRAL, VERDICT_UNSPECIFIED. Other values pass through as-is. */
+export type InspectionVerdict = string;
+/** Known values: ALLOWED, DISALLOWED, ROBOTS_TXT_STATE_UNSPECIFIED. */
+export type RobotsTxtState = string;
+/** Known values: INDEXING_ALLOWED, BLOCKED_BY_META_TAG, BLOCKED_BY_HTTP_HEADER, BLOCKED_BY_ROBOTS_TXT, INDEXING_STATE_UNSPECIFIED. */
+export type IndexingState = string;
+/** Known values: SUCCESSFUL, SOFT_404, BLOCKED_ROBOTS_TXT, NOT_FOUND, ACCESS_DENIED, SERVER_ERROR, REDIRECT_ERROR, ACCESS_FORBIDDEN, BLOCKED_4XX, INTERNAL_CRAWL_ERROR, INVALID_URL, PAGE_FETCH_STATE_UNSPECIFIED. */
+export type PageFetchState = string;
 
 export interface MobileIssue {
   issueType: string;
-  severity: 'WARNING' | 'ERROR';
+  /** Known values: WARNING, ERROR. Other values pass through as-is. */
+  severity: string;
   message: string;
 }
 
@@ -171,7 +300,8 @@ export interface IndexStatusResult {
   googleCanonical?: string;
   userCanonical?: string;
   referringUrls?: string[];
-  crawledAs?: 'DESKTOP' | 'MOBILE';
+  /** Known values: DESKTOP, MOBILE. Other values pass through as-is. */
+  crawledAs?: string;
 }
 
 export interface MobileUsabilityResult {
@@ -349,25 +479,46 @@ export const TopPagesQuerySchema = z.object({
 
 export type TopPagesQuery = z.infer<typeof TopPagesQuerySchema>;
 
-// Index coverage types
-export interface IndexCoverageSummary {
-  totalUrls: number;
-  indexed: number;
-  excluded: number;
-  error: number;
+// Sitemap indexation summary types.
+//
+// Every field traces to the Sitemaps API (sitemaps.list). This is NOT the Search
+// Console Index Coverage report — no such report is exposed by the public API.
+export interface SitemapIndexationEntry {
+  path: string;
+  last_submitted: string;
+  /** When Google last fetched this sitemap file. Old dates mean the counts below are stale. */
+  last_downloaded: string | null;
+  is_pending: boolean;
+  is_sitemaps_index: boolean;
+  sitemap_file_errors: number;
+  sitemap_file_warnings: number;
+  submitted_urls: number;
+  indexed_urls: number;
+  by_content_type: SitemapContent[];
 }
 
-export interface IndexCoverageResponse {
-  summary: IndexCoverageSummary;
-  exclusionReasons: Record<string, number>;
+export interface SitemapIndexationSummaryResponse {
+  summary: {
+    /** Σ `submitted` across sitemap contents, as reported by the Sitemaps API. */
+    submitted_urls: number;
+    /** Σ `indexed` across sitemap contents, as reported by the Sitemaps API. */
+    indexed_urls: number;
+    /** Count of sitemap FILE errors (problems reading the sitemap itself), not URL indexing errors. */
+    sitemap_file_errors: number;
+    sitemap_file_warnings: number;
+    /** Oldest last_downloaded across the included sitemaps — the staleness bound for all counts here. */
+    oldest_last_downloaded: string | null;
+  };
+  sitemaps: SitemapIndexationEntry[];
+  warnings: string[];
 }
 
-export const IndexCoverageQuerySchema = z.object({
+export const SitemapIndexationQuerySchema = z.object({
   siteUrl: z.string(),
   sitemapUrl: z.string().url().optional()
 });
 
-export type IndexCoverageQuery = z.infer<typeof IndexCoverageQuerySchema>;
+export type SitemapIndexationQuery = z.infer<typeof SitemapIndexationQuerySchema>;
 
 // Error types
 export interface GSCError {

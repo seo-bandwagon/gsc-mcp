@@ -1,6 +1,6 @@
 {
   "name": "@seobandwagon/gsc-mcp",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Google Search Console MCP server — bring your GSC data into Claude and other MCP clients.",
   "type": "module",
   "main": "dist/index.js",

@@ -1,73 +1,76 @@
 <!--
-  Evaluation suite for @seobandwagon/gsc-mcp.
+  Evaluation suite for @seobandwagon/gsc-mcp v0.2.0.
 
-  IMPORTANT: Because Google Search Console data is account-specific and changes
-  daily, these questions are written as a TEMPLATE against a fixed-snapshot
-  "canonical property". Before running, substitute:
+  All questions are pinned to the live property sc-domain:seobandwagon.com and the
+  FINALIZED window 2026-07-01 → 2026-07-07 (data for these dates was final as of
+  2026-07-10, so answers are stable). Every answer below was verified against the live
+  API on 2026-07-10.
 
-    {SITE}       — your verified GSC property URL (e.g. sc-domain:example.com)
-    {SNAPSHOT}   — a fixed 28-day window whose data you've frozen for testing
-    {SNAPSHOT_START}, {SNAPSHOT_END} — the YYYY-MM-DD bounds of {SNAPSHOT}
-    {PREV_START}, {PREV_END}         — the preceding 28-day window
+  Questions are INDEPENDENT, READ-ONLY, multi-call, and verifiable by string comparison.
 
-  Then fill in each <answer> with the value you verified against the snapshot.
+  Old-server discriminators — an agent on v0.1.x answers these WRONGLY, an agent on
+  v0.2.0 answers correctly:
+    Q1 (needs explicit aggregation semantics; old default silently flips meaning),
+    Q2 (needs gsc_coverage_report; old server has no way to see the drop),
+    Q4 (old top-N returned an alphabetical slice; the true #1 was omitted entirely),
+    Q7 (old gsc_inspect_url crashed with MCP -32602 on this exact URL),
+    Q5 (old tool reported sitemap file errors as URL "error" counts and a fabricated
+        "excluded" figure).
 
-  The questions below are designed to exercise every tool family and stress the
-  structuredContent output. They are INDEPENDENT, READ-ONLY, and composable —
-  solving each should require 2–8 tool calls.
-
-  See evals/README.md for the recommended snapshot workflow.
+  Exception to the answer-stability rule: Q2's coverage drifts slightly as Google
+  recomputes the dropped-data set (86.2% and 86.5% measured on consecutive days), so the
+  expected answer is given to the nearest whole percent, which has been stable.
 -->
 <evaluation>
 
   <qa_pair>
-    <question>Which query had the highest CTR (among queries with at least 100 impressions) on {SITE} during the 28 days starting {SNAPSHOT_START}? Report the exact query string.</question>
-    <answer>TODO_FILL_IN</answer>
+    <question>For the property sc-domain:seobandwagon.com over 2026-07-01 to 2026-07-07 (web search), what is the true page-impression count — i.e. total impressions counted per page rather than per property? Return the integer.</question>
+    <answer>1208</answer>
   </qa_pair>
 
   <qa_pair>
-    <question>Across all top pages of {SITE} during the window {SNAPSHOT_START} to {SNAPSHOT_END}, how many distinct pages rank between position 4 and position 10 inclusive? Return the count as an integer.</question>
-    <answer>TODO_FILL_IN</answer>
+    <question>For sc-domain:seobandwagon.com over 2026-07-01 to 2026-07-07, what fraction of the property's true impression total do the query-dimension rows account for? Return the percentage rounded to the nearest whole number.</question>
+    <answer>86</answer>
   </qa_pair>
 
   <qa_pair>
-    <question>Compare the 28-day window starting {SNAPSHOT_START} against the immediately preceding 28-day window for {SITE}. What is the percentage change in total clicks, rounded to the nearest whole number and prefixed with + or -?</question>
-    <answer>TODO_FILL_IN</answer>
+    <question>For sc-domain:seobandwagon.com over 2026-07-01 to 2026-07-07, which page contributes the largest share of the sitewide position mass (sum of position × impressions across pages), and what is that share as a percentage of the total position mass, rounded to the nearest whole number? Answer as "URL, N%".</question>
+    <answer>https://seobandwagon.com/, 76%</answer>
   </qa_pair>
 
   <qa_pair>
-    <question>Inspect the URL {SITE}/ (the site root) on {SITE}. What is the coverageState returned by the index status? Return it exactly as the API reports it.</question>
-    <answer>TODO_FILL_IN</answer>
+    <question>Request the top 25 queries by impressions for sc-domain:seobandwagon.com over 2026-07-01 to 2026-07-07. Which query ranks #1, and how many impressions does it have? Answer as "query, N".</question>
+    <answer>yext local seo, 45</answer>
   </qa_pair>
 
   <qa_pair>
-    <question>For {SITE}, how many sitemaps are currently submitted that have at least one warning? Return the count.</question>
-    <answer>TODO_FILL_IN</answer>
+    <question>Across all sitemaps submitted for sc-domain:seobandwagon.com, how many sitemap FILE errors (problems reading the sitemap files themselves, as reported by the Sitemaps API) are there in total, and what is the URL of the sitemap with the oldest last-download date by Google? Answer as "N, URL".</question>
+    <answer>2, http://tumblr.seobandwagon.com/rss</answer>
   </qa_pair>
 
   <qa_pair>
-    <question>Using the cannibalization check on {SITE} for the window {SNAPSHOT_START} to {SNAPSHOT_END}, which query has the most pages competing for it? Return the exact query string. (If multiple tie, return the alphabetically first.)</question>
-    <answer>TODO_FILL_IN</answer>
+    <question>For sc-domain:seobandwagon.com over 2026-07-01 to 2026-07-07, the property-level impression total and the sum of impressions across per-page rows are two different numbers. State both as "propertyTotal vs pageSum".</question>
+    <answer>1076 vs 1208</answer>
   </qa_pair>
 
   <qa_pair>
-    <question>For {SITE} over the window {SNAPSHOT_START} to {SNAPSHOT_END}, how many queries have an average position between 4.0 and 10.0 AND more than 500 impressions? Return the integer count.</question>
-    <answer>TODO_FILL_IN</answer>
+    <question>Inspect the URL https://seobandwagon.com/seo-services on the property sc-domain:seobandwagon.com. What are the index-status verdict and the coverageState? Answer as "VERDICT, coverageState".</question>
+    <answer>PASS, Submitted and indexed</answer>
   </qa_pair>
 
   <qa_pair>
-    <question>Run the opportunity analyzer on {SITE} with analysisType "standard". How many opportunities are classified as high priority? Return the integer count.</question>
-    <answer>TODO_FILL_IN</answer>
+    <question>For sc-domain:seobandwagon.com over 2026-07-01 to 2026-07-07, does the sum of daily impressions (grouping by date) exactly equal the impression total with no dimensions at all? Answer "yes N" or "no N vs M" using the number(s) you measured.</question>
+    <answer>yes 1076</answer>
   </qa_pair>
 
   <qa_pair>
-    <question>On {SITE} during the window {SNAPSHOT_START} to {SNAPSHOT_END}, which single page received the most clicks? Return its absolute URL.</question>
-    <answer>TODO_FILL_IN</answer>
+    <question>How many search-appearance (rich result) types are recorded for sc-domain:seobandwagon.com over 2026-07-01 to 2026-07-07? Return the integer count.</question>
+    <answer>0</answer>
   </qa_pair>
 
   <qa_pair>
-    <question>Submit a bulk inspection of the three URLs {SITE}/, {SITE}/about, and {SITE}/contact on {SITE}. How many of the three return verdict "PASS" on indexStatusResult? Return the integer count.</question>
-    <answer>TODO_FILL_IN</answer>
+    <question>For sc-domain:seobandwagon.com over 2026-07-01 to 2026-07-07, the sitewide average position (byProperty) is about 45.6 while the page https://seobandwagon.com/seo-services averages position ~5.1. If that page lost all of its impressions, would the sitewide average position number get larger (worse) or smaller (better)? Answer "larger" or "smaller".</question>
+    <answer>larger</answer>
   </qa_pair>
 
 </evaluation>

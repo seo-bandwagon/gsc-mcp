@@ -6,8 +6,9 @@ import type {
   Sitemap,
   SitemapsListResponse,
   SitemapQuery,
-  IndexCoverageQuery,
-  IndexCoverageResponse
+  SitemapIndexationQuery,
+  SitemapIndexationSummaryResponse,
+  SitemapIndexationEntry
 } from '../types/index.js';
 
 export class SitemapsApi {
@@ -126,44 +127,59 @@ export class SitemapsApi {
     }
   }
 
-  async getIndexCoverage(params: IndexCoverageQuery): Promise<IndexCoverageResponse> {
-    // Get sitemap data
+  /**
+   * Summarize what the Sitemaps API reports about submitted vs indexed URL counts.
+   *
+   * Every number here traces to sitemaps.list. This is NOT the Search Console Index
+   * Coverage report (the public API does not expose it); counts are only as fresh as
+   * each sitemap's last_downloaded date, which is surfaced for exactly that reason.
+   */
+  async getSitemapIndexationSummary(params: SitemapIndexationQuery): Promise<SitemapIndexationSummaryResponse> {
     const sitemapsResponse = await this.listSitemaps(params.siteUrl);
 
-    let totalUrls = 0;
-    let indexed = 0;
-    const exclusionReasons: Record<string, number> = {};
-
-    // Filter by specific sitemap if provided
     const sitemaps = params.sitemapUrl
       ? sitemapsResponse.sitemap.filter((s) => s.path === params.sitemapUrl)
       : sitemapsResponse.sitemap;
 
-    for (const sitemap of sitemaps) {
-      for (const content of sitemap.contents) {
-        totalUrls += content.submitted;
-        indexed += content.indexed;
-      }
+    const entries: SitemapIndexationEntry[] = sitemaps.map((sitemap) => ({
+      path: sitemap.path,
+      last_submitted: sitemap.lastSubmitted,
+      last_downloaded: sitemap.lastDownloaded ?? null,
+      is_pending: sitemap.isPending,
+      is_sitemaps_index: sitemap.isSitemapsIndex,
+      sitemap_file_errors: sitemap.errors,
+      sitemap_file_warnings: sitemap.warnings,
+      submitted_urls: sitemap.contents.reduce((s, c) => s + c.submitted, 0),
+      indexed_urls: sitemap.contents.reduce((s, c) => s + c.indexed, 0),
+      by_content_type: sitemap.contents
+    }));
 
-      if (sitemap.errors > 0) {
-        exclusionReasons['sitemapErrors'] = (exclusionReasons['sitemapErrors'] || 0) + sitemap.errors;
-      }
+    const downloadedDates = entries.map((e) => e.last_downloaded).filter((d): d is string => d !== null);
+    const oldestDownloaded = downloadedDates.length > 0 ? [...downloadedDates].sort()[0] : null;
 
-      if (sitemap.warnings > 0) {
-        exclusionReasons['sitemapWarnings'] = (exclusionReasons['sitemapWarnings'] || 0) + sitemap.warnings;
-      }
+    const warnings: string[] = [];
+    if (params.sitemapUrl && entries.length === 0) {
+      warnings.push(`No submitted sitemap matches ${params.sitemapUrl}. Use gsc_list_sitemaps to see what exists.`);
     }
-
-    const excluded = totalUrls - indexed;
+    const staleCutoff = Date.now() - 30 * 86400000;
+    const stale = entries.filter((e) => e.last_downloaded && Date.parse(e.last_downloaded) < staleCutoff);
+    if (stale.length > 0) {
+      warnings.push(
+        `Stale counts: Google last fetched ${stale.map((e) => `${e.path} on ${e.last_downloaded!.slice(0, 10)}`).join('; ')}. ` +
+        'Submitted/indexed counts for those sitemaps have not been refreshed since then.'
+      );
+    }
 
     return {
       summary: {
-        totalUrls,
-        indexed,
-        excluded,
-        error: exclusionReasons['sitemapErrors'] || 0
+        submitted_urls: entries.reduce((s, e) => s + e.submitted_urls, 0),
+        indexed_urls: entries.reduce((s, e) => s + e.indexed_urls, 0),
+        sitemap_file_errors: entries.reduce((s, e) => s + e.sitemap_file_errors, 0),
+        sitemap_file_warnings: entries.reduce((s, e) => s + e.sitemap_file_warnings, 0),
+        oldest_last_downloaded: oldestDownloaded
       },
-      exclusionReasons
+      sitemaps: entries,
+      warnings
     };
   }
 

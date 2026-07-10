@@ -1,47 +1,43 @@
 # Evaluations
 
-Per-release evaluation suite for the MCP server. Exercises every tool family and tests whether an LLM client can correctly use structured tool outputs to answer realistic SEO questions.
+Per-release evaluation suite for the MCP server. Tests whether an LLM client can use the
+tools to answer realistic SEO questions **correctly** — including questions the v0.1.x
+server answered wrongly.
 
-## Why template-style?
+## Suite layout
 
-Google Search Console data is **account-specific** and **changes daily**. A static eval that hard-codes "answer: 1,247 clicks" would be wrong tomorrow. So `gsc-mcp.xml` is a **template** — each question is parameterized against a property and a snapshot window you control.
+`gsc-mcp.xml` contains 10 question/answer pairs pinned to the live property
+`sc-domain:seobandwagon.com` over the finalized window **2026-07-01 → 2026-07-07**.
+Every answer was verified directly against the Google API on 2026-07-10.
 
-## How to run evals (snapshot workflow)
+Questions are independent, read-only, multi-call, and verifiable by string comparison.
 
-1. **Pick a stable test property.** Ideally one you own, with at least 90 days of history and no recent major content changes. A staging site works if it has enough organic traffic.
-2. **Freeze a snapshot window.** Pick a 28-day window that's at least 3 days old (so Google's data is finalized). Record `{SNAPSHOT_START}`, `{SNAPSHOT_END}`.
-3. **Record the preceding window.** `{PREV_START}` = 28 days before `{SNAPSHOT_START}`; `{PREV_END}` = the day before `{SNAPSHOT_START}`.
-4. **Answer each question yourself** by calling the tools directly (use MCP Inspector: `npx @modelcontextprotocol/inspector npx @seobandwagon/gsc-mcp`). Record each answer.
-5. **Copy `gsc-mcp.xml` → `gsc-mcp.<property>.xml`**, substitute `{SITE}`, `{SNAPSHOT_START}`, etc., and replace each `TODO_FILL_IN` with your verified answer.
-6. **Run the eval** by pointing your eval harness at the customized XML.
+## Old-server discriminators
 
-Tokenized placeholders in `gsc-mcp.xml`:
-- `{SITE}` — property URL (e.g. `sc-domain:example.com` or `https://example.com/`)
-- `{SNAPSHOT_START}`, `{SNAPSHOT_END}` — snapshot window in `YYYY-MM-DD`
-- `{PREV_START}`, `{PREV_END}` — preceding window (used by the period-comparison question)
+Five questions are constructed so an agent on v0.1.x fails while v0.2.0 succeeds:
 
-## Question coverage
-
-| # | Tool family exercised | Tests |
+| # | Question | Why v0.1.x fails |
 |---|---|---|
-| 1 | `gsc_top_queries` + filter/sort | Query-level structured output |
-| 2 | `gsc_top_pages` + position filter | Page-level aggregation + threshold reasoning |
-| 3 | `gsc_compare_periods` | Delta computation, sign convention |
-| 4 | `gsc_inspect_url` | Index status verdict |
-| 5 | `gsc_list_sitemaps` | Sitemap warning count |
-| 6 | `gsc_cannibalization_check` | Multi-page query detection |
-| 7 | `gsc_search_analytics` + post-filter | Dimension + metric threshold composition |
-| 8 | `gsc_analyze_opportunities` | Priority breakdown |
-| 9 | `gsc_top_pages` | Top-page resolution |
-| 10 | `gsc_bulk_inspect` | Batch inspection verdict aggregation |
+| 1 | True page-impression count (1,208) | Old `auto` aggregation silently returned byProperty (1,076) with no unit label |
+| 2 | Query-dimension coverage (86%) | No `gsc_coverage_report`; the drop was invisible |
+| 4 | #1 query in a top-25-by-impressions request | Old top-N ranked a clicks-then-alphabetical truncation; the true #1 (`yext local seo`) wasn't in the slice at all |
+| 5 | Sitemap FILE errors + stale download date | Old `gsc_index_coverage` reported file errors as URL `error` counts and didn't surface `last_downloaded` |
+| 7 | Inspect `/seo-services` | Old `gsc_inspect_url` crashed with MCP `-32602` on this exact URL |
 
-## Tips for strong answers
+## Answer stability
 
-- Prefer **exact string answers** (query strings, URLs, API verdict enums). These verify cleanly.
-- Prefer **integer counts** over floats — avoids rounding disputes.
-- For percentage answers, agree on rounding ahead of time (the eval uses "nearest whole number").
-- When multiple ties are possible, the question specifies how to break them (e.g. "alphabetically first").
+The window is finalized, and the lossless figures (1,076 / 1,208 / page rows / verdicts)
+reproduce exactly across days. The one caveat: **query-grain coverage drifts** as Google
+recomputes the dropped-data set (86.2% → 86.5% measured on consecutive days), so Q2's
+answer is pinned to the nearest whole percent (86), which has been stable. If it ever
+drifts past a rounding boundary, re-verify with `gsc_coverage_report` and update — the
+drift itself is documented behavior (see `gsc://guidance/data-loss`).
 
-## Future: fixture mode
+## Running
 
-A dedicated test/fixture mode for the server (returning canned `googleapis` responses) would let us ship stable, out-of-the-box evals. Tracked for v0.2+.
+Point your eval harness at `gsc-mcp.xml` with the server configured for an account that
+has access to the pinned property. To re-pin to a different property/window: answer every
+question yourself by calling the tools directly (MCP Inspector:
+`npx @modelcontextprotocol/inspector npx @seobandwagon/gsc-mcp`), then replace the
+answers. Prefer exact strings and integers; for percentages, round to the nearest whole
+number.

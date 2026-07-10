@@ -1,11 +1,14 @@
 import type { Tool, ToolHandler } from './types.js';
-import { ok } from './types.js';
+import { okFormatted, RESPONSE_FORMAT_PROP } from './types.js';
 import type { SitemapsApi } from '../api/sitemaps.js';
 import { handleToolError } from '../utils/errors.js';
+import { tableFromObjects, toMarkdown, warningsBlock } from '../utils/markdown.js';
 import {
+  ResponseFormatSchema,
   SitemapQuerySchema,
-  IndexCoverageQuerySchema
+  SitemapIndexationQuerySchema
 } from '../types/index.js';
+import type { ResponseFormat } from '../types/index.js';
 
 const SITEMAP_SHAPE = {
   type: 'object',
@@ -14,7 +17,7 @@ const SITEMAP_SHAPE = {
     lastSubmitted: { type: 'string' },
     isPending: { type: 'boolean' },
     isSitemapsIndex: { type: 'boolean' },
-    lastDownloaded: { type: 'string' },
+    lastDownloaded: { type: 'string', description: 'When Google last fetched the sitemap file. Counts are only as fresh as this date.' },
     warnings: { type: 'number' },
     errors: { type: 'number' },
     contents: {
@@ -42,17 +45,55 @@ const MUTATION_RESULT = {
   required: ['success', 'message']
 } as const;
 
+const INDEXATION_ENTRY = {
+  type: 'object',
+  properties: {
+    path: { type: 'string' },
+    last_submitted: { type: 'string' },
+    last_downloaded: { type: ['string', 'null'], description: 'When Google last fetched this sitemap file. Old dates mean the counts are stale.' },
+    is_pending: { type: 'boolean' },
+    is_sitemaps_index: { type: 'boolean' },
+    sitemap_file_errors: { type: 'number', description: 'Errors reading the sitemap FILE itself — not URL indexing errors.' },
+    sitemap_file_warnings: { type: 'number' },
+    submitted_urls: { type: 'number' },
+    indexed_urls: { type: 'number' },
+    by_content_type: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: {
+          type: { type: 'string' },
+          submitted: { type: 'number' },
+          indexed: { type: 'number' }
+        },
+        required: ['type', 'submitted', 'indexed']
+      }
+    }
+  },
+  required: ['path', 'last_submitted', 'last_downloaded', 'is_pending', 'is_sitemaps_index', 'sitemap_file_errors', 'sitemap_file_warnings', 'submitted_urls', 'indexed_urls', 'by_content_type']
+} as const;
+
+function parseFormat(args: Record<string, unknown>): ResponseFormat {
+  return ResponseFormatSchema.parse(args.response_format ?? undefined);
+}
+
+function stripFormat(args: Record<string, unknown>): Record<string, unknown> {
+  const { response_format: _ignored, ...rest } = args;
+  return rest;
+}
+
 export function createSitemapsTools(sitemapsApi: SitemapsApi): { tools: Tool[]; handlers: Map<string, ToolHandler> } {
   const handlers = new Map<string, ToolHandler>();
 
   const tools: Tool[] = [
     {
       name: 'gsc_list_sitemaps',
-      description: 'List all sitemaps submitted for a property with per-sitemap status and per-content-type index coverage.',
+      description: 'List all sitemaps submitted for a property with per-sitemap status and per-content-type submitted/indexed counts as reported by the Sitemaps API.',
       inputSchema: {
         type: 'object',
         properties: {
-          siteUrl: { type: 'string', description: 'The verified property URL.' }
+          siteUrl: { type: 'string', description: 'The verified property URL.' },
+          response_format: RESPONSE_FORMAT_PROP
         },
         required: ['siteUrl'],
         additionalProperties: false
@@ -64,7 +105,7 @@ export function createSitemapsTools(sitemapsApi: SitemapsApi): { tools: Tool[]; 
         },
         required: ['sitemap']
       },
-      annotations: { readOnlyHint: true, idempotentHint: true, openWorldHint: true }
+      annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true }
     },
     {
       name: 'gsc_submit_sitemap',
@@ -109,13 +150,18 @@ export function createSitemapsTools(sitemapsApi: SitemapsApi): { tools: Tool[]; 
       }
     },
     {
-      name: 'gsc_index_coverage',
-      description: 'Aggregate index coverage across a property\'s sitemaps. Returns totals, indexed vs excluded counts, and exclusion reason breakdown.',
+      name: 'gsc_sitemap_indexation_summary',
+      description:
+        'Summarize submitted vs indexed URL counts across the property\'s sitemaps, as reported by the Sitemaps API. ' +
+        'This is NOT the Search Console Index Coverage report — the public API does not expose that report, and per-URL index status requires the URL Inspection API (gsc_inspect_url / gsc_bulk_inspect). ' +
+        'Counts are only as fresh as each sitemap\'s last_downloaded date (surfaced per sitemap and as oldest_last_downloaded). ' +
+        'sitemap_file_errors counts problems reading the sitemap files themselves, not URL indexing errors.',
       inputSchema: {
         type: 'object',
         properties: {
           siteUrl: { type: 'string', description: 'The verified property URL.' },
-          sitemapUrl: { type: 'string', description: 'Optional — filter to one specific sitemap.' }
+          sitemapUrl: { type: 'string', description: 'Optional — restrict to one specific sitemap.' },
+          response_format: RESPONSE_FORMAT_PROP
         },
         required: ['siteUrl'],
         additionalProperties: false
@@ -126,28 +172,29 @@ export function createSitemapsTools(sitemapsApi: SitemapsApi): { tools: Tool[]; 
           summary: {
             type: 'object',
             properties: {
-              totalUrls: { type: 'number' },
-              indexed: { type: 'number' },
-              excluded: { type: 'number' },
-              error: { type: 'number' }
+              submitted_urls: { type: 'number', description: 'Σ submitted across sitemap contents (Sitemaps API field).' },
+              indexed_urls: { type: 'number', description: 'Σ indexed across sitemap contents (Sitemaps API field).' },
+              sitemap_file_errors: { type: 'number', description: 'Σ sitemap FILE errors — not URL indexing errors.' },
+              sitemap_file_warnings: { type: 'number' },
+              oldest_last_downloaded: { type: ['string', 'null'], description: 'Staleness bound: the oldest last_downloaded among included sitemaps.' }
             },
-            required: ['totalUrls', 'indexed', 'excluded', 'error']
+            required: ['submitted_urls', 'indexed_urls', 'sitemap_file_errors', 'sitemap_file_warnings', 'oldest_last_downloaded']
           },
-          exclusionReasons: {
-            type: 'object',
-            additionalProperties: true
-          }
+          sitemaps: { type: 'array', items: INDEXATION_ENTRY },
+          warnings: { type: 'array', items: { type: 'string' } }
         },
-        required: ['summary', 'exclusionReasons']
+        required: ['summary', 'sitemaps', 'warnings']
       },
-      annotations: { readOnlyHint: true, idempotentHint: true, openWorldHint: true }
+      annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true }
     }
   ];
 
   handlers.set('gsc_list_sitemaps', async (args) => {
     try {
+      const format = parseFormat(args);
       const siteUrl = args.siteUrl as string;
-      return ok(await sitemapsApi.listSitemaps(siteUrl));
+      const data = await sitemapsApi.listSitemaps(siteUrl);
+      return okFormatted(data, format, (d) => `## Sitemaps\n\n${toMarkdown(d.sitemap, 3)}`);
     } catch (error) {
       return handleToolError(error);
     }
@@ -155,8 +202,9 @@ export function createSitemapsTools(sitemapsApi: SitemapsApi): { tools: Tool[]; 
 
   handlers.set('gsc_submit_sitemap', async (args) => {
     try {
-      const params = SitemapQuerySchema.parse(args);
-      return ok(await sitemapsApi.submitSitemap(params));
+      const params = SitemapQuerySchema.parse(stripFormat(args));
+      const data = await sitemapsApi.submitSitemap(params);
+      return okFormatted(data, 'json', (d) => d.message);
     } catch (error) {
       return handleToolError(error);
     }
@@ -164,17 +212,36 @@ export function createSitemapsTools(sitemapsApi: SitemapsApi): { tools: Tool[]; 
 
   handlers.set('gsc_delete_sitemap', async (args) => {
     try {
-      const params = SitemapQuerySchema.parse(args);
-      return ok(await sitemapsApi.deleteSitemap(params));
+      const params = SitemapQuerySchema.parse(stripFormat(args));
+      const data = await sitemapsApi.deleteSitemap(params);
+      return okFormatted(data, 'json', (d) => d.message);
     } catch (error) {
       return handleToolError(error);
     }
   });
 
-  handlers.set('gsc_index_coverage', async (args) => {
+  handlers.set('gsc_sitemap_indexation_summary', async (args) => {
     try {
-      const params = IndexCoverageQuerySchema.parse(args);
-      return ok(await sitemapsApi.getIndexCoverage(params));
+      const format = parseFormat(args);
+      const params = SitemapIndexationQuerySchema.parse(stripFormat(args));
+      const data = await sitemapsApi.getSitemapIndexationSummary(params);
+      return okFormatted(data, format, (d) =>
+        `## Sitemap indexation summary\n\n` +
+        `_Sitemap-reported counts only — not the Index Coverage report. Freshness bound: ${d.summary.oldest_last_downloaded ?? 'unknown'}._\n\n` +
+        warningsBlock(d.warnings) +
+        tableFromObjects([{ ...d.summary }]) +
+        `\n### Per sitemap\n\n` +
+        tableFromObjects(
+          d.sitemaps.map((s) => ({
+            path: s.path,
+            last_downloaded: s.last_downloaded ?? 'never',
+            submitted_urls: s.submitted_urls,
+            indexed_urls: s.indexed_urls,
+            file_errors: s.sitemap_file_errors,
+            file_warnings: s.sitemap_file_warnings
+          }))
+        )
+      );
     } catch (error) {
       return handleToolError(error);
     }
